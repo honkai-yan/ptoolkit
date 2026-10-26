@@ -1,0 +1,135 @@
+diff --git a/src/ftxui/component/app.cpp b/src/ftxui/component/app.cpp
+--- a/src/ftxui/component/app.cpp
++++ b/src/ftxui/component/app.cpp
+@@ -48,6 +48,7 @@
+ #endif
+ #include <io.h>
+ #include <windows.h>
++#include "ftxui/component/win32_input.hpp"
+ #else
+ #include <fcntl.h>
+ #include <poll.h>
+@@ -610,7 +611,12 @@
+   const int enable_window_input = 0x0008;
+   in_mode &= ~enable_echo_input;
+   in_mode &= ~enable_line_input;
+-  in_mode |= enable_virtual_terminal_input;
++  // Deliver Ctrl+C as an input event so focused editors can copy selections.
++  in_mode &= ~ENABLE_PROCESSED_INPUT;
++  // Native records preserve modifiers which VT input can collapse (Ctrl+Shift+Z).
++  in_mode &= ~enable_virtual_terminal_input;
++  in_mode |= ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS;
++  in_mode &= ~ENABLE_QUICK_EDIT_MODE;
+   in_mode |= enable_window_input;
+ 
+   SetConsoleMode(stdin_handle, in_mode);
+@@ -1342,13 +1348,21 @@
+           continue;
+         }
+         const wchar_t wc = key_event.uChar.UnicodeChar;
++        const auto special = detail::Win32SpecialKey(key_event);
++        if (!special.empty()) {
++          for (WORD repeat = 0; repeat < key_event.wRepeatCount; ++repeat) {
++            for (char ch : special) terminal_input_parser.Add(ch);
++          }
++          continue;
++        }
++        if (!wc) continue;
+         wstring += wc;
+         if (wc >= 0xd800 && wc <= 0xdbff) {
+           // Wait for the Low Surrogate to arrive in the next record.
+           continue;
+         }
+-        for (auto it : to_string(wstring)) {
+-          terminal_input_parser.Add(it);
++        for (WORD repeat = 0; repeat < key_event.wRepeatCount; ++repeat) {
++          for (auto it : to_string(wstring)) terminal_input_parser.Add(it);
+         }
+         wstring.clear();
+       } break;
+@@ -1357,8 +1371,29 @@
+         break;
+       case MENU_EVENT:
+       case FOCUS_EVENT:
++        break;
+       case MOUSE_EVENT:
+-        // TODO(mauve): Implement later.
++      {
++        const auto& input = r.Event.MouseEvent;
++        CONSOLE_SCREEN_BUFFER_INFO info{};
++        GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info);
++        Mouse mouse;
++        // Match the 1-based terminal coordinates produced by the VT parser.
++        // HandleTask subtracts the 1-based screen origin before dispatching.
++        mouse.x = input.dwMousePosition.X - info.srWindow.Left + 1;
++        mouse.y = input.dwMousePosition.Y - info.srWindow.Top + 1;
++        mouse.shift = input.dwControlKeyState & SHIFT_PRESSED;
++        mouse.control = input.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
++        mouse.meta = input.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
++        if (input.dwEventFlags & MOUSE_WHEELED)
++          mouse.button = static_cast<SHORT>(HIWORD(input.dwButtonState)) > 0 ? Mouse::WheelUp : Mouse::WheelDown;
++        else if (input.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) mouse.button = Mouse::Left;
++        else if (input.dwButtonState & RIGHTMOST_BUTTON_PRESSED) mouse.button = Mouse::Right;
++        else if (input.dwButtonState & FROM_LEFT_2ND_BUTTON_PRESSED) mouse.button = Mouse::Middle;
++        mouse.motion = input.dwEventFlags & MOUSE_MOVED ? Mouse::Moved : Mouse::Pressed;
++        if (mouse.button == Mouse::None) mouse.motion = Mouse::Released;
++        public_->PostEvent(Event::Mouse("", mouse));
++      }
+         break;
+     }
+   }
+diff --git a/src/ftxui/component/win32_input.hpp b/src/ftxui/component/win32_input.hpp
+new file mode 100644
+--- /dev/null
++++ b/src/ftxui/component/win32_input.hpp
+@@ -0,0 +1,50 @@
++// Local ptoolkit adapter for FTXUI 7.0.3. See 3rdparty/README.md.
++#pragma once
++
++#include <string>
++#include <windows.h>
++
++namespace ftxui::detail {
++inline std::string Win32SpecialKey(const KEY_EVENT_RECORD& key) {
++  const bool shift = key.dwControlKeyState & SHIFT_PRESSED;
++  const bool control = key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
++  const bool alt = key.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
++  const int modifier = 1 + shift + 2 * alt + 4 * control;
++  if (key.wVirtualKeyCode == 'Z' && control && shift) return "\x1b[122;6u";
++  if (key.wVirtualKeyCode == VK_TAB && shift) return "\x1b[Z";
++  char suffix = 0;
++  switch (key.wVirtualKeyCode) {
++    case VK_UP: suffix = 'A'; break;
++    case VK_DOWN: suffix = 'B'; break;
++    case VK_RIGHT: suffix = 'C'; break;
++    case VK_LEFT: suffix = 'D'; break;
++    case VK_HOME: suffix = 'H'; break;
++    case VK_END: suffix = 'F'; break;
++  }
++  if (suffix) return modifier == 1 ? std::string("\x1b[") + suffix
++                                  : "\x1b[1;" + std::to_string(modifier) + suffix;
++  if (key.wVirtualKeyCode >= VK_F1 && key.wVirtualKeyCode <= VK_F4) {
++    const char end = 'P' + key.wVirtualKeyCode - VK_F1;
++    return modifier == 1 ? std::string("\x1bO") + end
++                         : "\x1b[1;" + std::to_string(modifier) + end;
++  }
++  int code = 0;
++  switch (key.wVirtualKeyCode) {
++    case VK_INSERT: code = 2; break;
++    case VK_DELETE: code = 3; break;
++    case VK_PRIOR: code = 5; break;
++    case VK_NEXT: code = 6; break;
++    case VK_F5: code = 15; break;
++    case VK_F6: code = 17; break;
++    case VK_F7: code = 18; break;
++    case VK_F8: code = 19; break;
++    case VK_F9: code = 20; break;
++    case VK_F10: code = 21; break;
++    case VK_F11: code = 23; break;
++    case VK_F12: code = 24; break;
++  }
++  if (code) return "\x1b[" + std::to_string(code) +
++                   (modifier == 1 ? "" : ";" + std::to_string(modifier)) + "~";
++  return {};
++}
++}  // namespace ftxui::detail
