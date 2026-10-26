@@ -10,8 +10,9 @@
 namespace ptoolkit::editor
 {
 Editor::Editor(std::shared_ptr<Document> document,
-               std::shared_ptr<Clipboard> clipboard)
-    : m_clipboard(clipboard ? std::move(clipboard) : MakeSystemClipboard())
+               std::shared_ptr<Clipboard> clipboard, bool json_highlight)
+    : m_clipboard(clipboard ? std::move(clipboard) : MakeSystemClipboard()),
+      m_json_highlight(json_highlight)
 {
   SetDocument(std::move(document));
 }
@@ -42,7 +43,9 @@ const Editor::CachedLine& Editor::GetLine(std::size_t number)
   cached = {};
   cached.version = m_document->LineVersion(number);
   const auto& line = m_document->Line(number);
-  const auto tokens = HighlightJsonLine(line);
+  // An empty token list renders every glyph as plain text.
+  const auto tokens =
+      m_json_highlight ? HighlightJsonLine(line) : std::vector<Token>{};
   std::size_t offset = 0, token = 0;
   for (auto& glyph : ftxui::Utf8ToGlyphs(line))
   {

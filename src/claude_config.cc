@@ -14,7 +14,9 @@
 
 namespace ptoolkit
 {
-std::expected<std::filesystem::path, std::string> ClaudeSettingsPath()
+namespace
+{
+std::expected<std::filesystem::path, std::string> HomeDirectory()
 {
 #ifdef _WIN32
   const DWORD size = GetEnvironmentVariableW(L"USERPROFILE", nullptr, 0);
@@ -25,12 +27,45 @@ std::expected<std::filesystem::path, std::string> ClaudeSettingsPath()
   if (!copied || copied >= size)
     return std::unexpected("Cannot resolve USERPROFILE");
   home.resize(copied);
-  return std::filesystem::path(home) / ".claude" / "settings.json";
+  return std::filesystem::path(home);
 #else
   const auto* home = std::getenv("HOME");
   if (!home || !*home) return std::unexpected("HOME is unavailable");
-  return std::filesystem::path(home) / ".claude" / "settings.json";
+  return std::filesystem::path(home);
 #endif
+}
+}  // namespace
+
+std::expected<std::filesystem::path, std::string> ClaudeSettingsPath()
+{
+  const auto home = HomeDirectory();
+  if (!home) return std::unexpected(home.error());
+  return *home / ".claude" / "settings.json";
+}
+
+std::expected<std::filesystem::path, std::string> ClaudePromptPath()
+{
+  const auto home = HomeDirectory();
+  if (!home) return std::unexpected(home.error());
+  return *home / ".claude" / "CLAUDE.md";
+}
+
+std::expected<ClaudePrompt, std::string> LoadClaudePrompt(
+    const std::filesystem::path& path)
+{
+  std::error_code ec;
+  const bool exists = std::filesystem::exists(path, ec);
+  if (ec)
+    return std::unexpected("Cannot access CLAUDE.md: " + ec.message());
+  if (!exists) return ClaudePrompt{path, std::make_shared<editor::Document>()};
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
+    return std::unexpected("Cannot open CLAUDE.md (file unreadable)");
+  std::string text{std::istreambuf_iterator<char>(file),
+                   std::istreambuf_iterator<char>()};
+  if (file.bad()) return std::unexpected("Cannot read CLAUDE.md");
+  if (text.starts_with("\xef\xbb\xbf")) text.erase(0, 3);
+  return ClaudePrompt{path, std::make_shared<editor::Document>(text)};
 }
 
 std::expected<ClaudeConfig, std::string> LoadClaudeConfig(

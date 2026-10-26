@@ -17,12 +17,14 @@ std::expected<void, std::string> WriteConfigText(
     const std::filesystem::path& path, std::string_view text,
     bool overwrite = true);
 std::expected<std::filesystem::path, std::string> ClaudePresetsPath();
+std::expected<std::filesystem::path, std::string> ClaudePromptPresetsPath();
 
 class PresetStore
 {
 public:
-  explicit PresetStore(std::filesystem::path directory)
-      : m_directory(std::move(directory))
+  explicit PresetStore(std::filesystem::path directory,
+                       std::string extension = ".json")
+      : m_directory(std::move(directory)), m_extension(std::move(extension))
   {
   }
   std::expected<std::vector<std::string>, std::string> List() const;
@@ -37,5 +39,6 @@ private:
   std::expected<std::filesystem::path, std::string> Path(
       std::string_view name) const;
   std::filesystem::path m_directory;
+  std::string m_extension;
 };
 }  // namespace ptoolkit

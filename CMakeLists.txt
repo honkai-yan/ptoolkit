@@ -8,6 +8,17 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED on)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
+if(APPLE)
+  enable_language(OBJCXX)
+  set(CMAKE_OBJCXX_STANDARD 23)
+  set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
+
+option(PTOOLKIT_BUILD_TESTS "Build application tests" OFF)
+if(PTOOLKIT_BUILD_TESTS OR PTOOLKIT_EDITOR_BUILD_TESTS)
+  enable_testing()
+endif()
+
 set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -21,7 +32,7 @@ add_library(ptoolkit_app STATIC
   src/claude_config.cc
   src/config_storage.cc
   src/ui/dialog.cc
-  src/ui/claude_config_view.cc
+  src/ui/preset_editor_view.cc
   src/ui/ui.cc
   src/config.cc
   src/system_info.cc
@@ -36,15 +47,24 @@ target_link_libraries(ptoolkit_app PUBLIC
 )
 
 if(WIN32)
-  target_link_libraries(ptoolkit_app PRIVATE dxgi gdi32)
+  target_link_libraries(ptoolkit_app PRIVATE dxgi gdi32 advapi32)
+elseif(APPLE)
+  target_sources(ptoolkit_app PRIVATE src/hardware_info_macos.mm)
+  set_source_files_properties(src/hardware_info_macos.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(ptoolkit_app PRIVATE "-framework Foundation" "-framework Metal"
+    "-framework IOKit" "-framework DiskArbitration")
 endif()
 
 add_executable(${CMAKE_PROJECT_NAME} src/main.cc)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ptoolkit_app)
 
-option(PTOOLKIT_BUILD_TESTS "Build application UI tests" OFF)
 if(PTOOLKIT_BUILD_TESTS)
-  enable_testing()
+  add_executable(ptoolkit_system_info_tests tests/system_info_tests.cc src/system_info.cc)
+  target_include_directories(ptoolkit_system_info_tests PRIVATE src)
+  add_test(NAME ptoolkit_system_info_tests COMMAND ptoolkit_system_info_tests)
+  add_executable(ptoolkit_hardware_info_tests tests/hardware_info_tests.cc)
+  target_link_libraries(ptoolkit_hardware_info_tests PRIVATE ptoolkit_app)
+  add_test(NAME ptoolkit_hardware_info_tests COMMAND ptoolkit_hardware_info_tests)
   add_executable(ptoolkit_ui_tests tests/ui_tests.cc)
   target_link_libraries(ptoolkit_ui_tests PRIVATE ptoolkit_app)
   add_test(NAME ptoolkit_ui_tests COMMAND ptoolkit_ui_tests)

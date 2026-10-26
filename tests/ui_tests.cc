@@ -261,8 +261,9 @@ void ClaudeConfiguration()
   Draw(view);
   view->OnEvent(Event::Character("cla"));
   auto screen = Draw(view);
-  Check(Line(screen, 19).find("claude_code_config_man") != std::string::npos,
-        "Claude command prefix completion");
+  Check(Line(screen, 18).find("claude_code_config_man") != std::string::npos &&
+            Line(screen, 19).find("claude_code_prompt_man") != std::string::npos,
+        "Claude command prefix completion lists both commands");
   view->OnEvent(Event::Tab);
   view->OnEvent(Event::Return);
   screen = Draw(view);
@@ -536,6 +537,165 @@ void PresetsAndSaving()
           "temporary save file cleaned up after failures");
   app.ExecuteCommand("home");
 }
+
+void ClaudePrompt()
+{
+  const auto root =
+      std::filesystem::current_path() /
+      ("prompt-fixture-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(root);
+  struct Cleanup
+  {
+    std::filesystem::path root;
+    ~Cleanup() { std::filesystem::remove_all(root); }
+  } cleanup{root};
+  const auto path = root / "CLAUDE.md";
+  const std::string original =
+      "# Global rules\n\nBe concise. Use \"quotes\", [brackets] and 42.\n";
+  Check(ptoolkit::WriteConfigText(path, original, false).has_value(),
+        "write prompt fixture");
+
+  auto loaded = ptoolkit::LoadClaudePrompt(path);
+  Check(loaded && loaded->path == path &&
+            loaded->document->Text() == original,
+        "prompt loads as plain text without JSON validation");
+  auto missing = ptoolkit::LoadClaudePrompt(root / "nested" / "CLAUDE.md");
+  Check(missing && missing->document->Text().empty(),
+        "missing prompt opens an empty document");
+
+  auto& app = ptoolkit::App::GetInstance();
+  app.ExecuteCommand("home");
+  int exits = 0;
+  auto view = ptoolkit::CreateApplicationView(app, [&] { ++exits; }, {}, {},
+                                              path);
+  Draw(view);
+  view->OnEvent(Event::Character("claude_code_prompt_man"));
+  view->OnEvent(Event::Return);
+  auto screen = Draw(view);
+  auto document = app.GetClaudePromptDocument();
+  Check(app.GetPage() == ptoolkit::App::Page::ClaudeCodePrompt && document,
+        "prompt command opens the global prompt");
+  Check(document->Text() == original, "prompt editor shows CLAUDE.md contents");
+  Check(Line(screen, 3).find("~/.claude/CLAUDE.md") != std::string::npos,
+        "prompt page labels the global prompt path");
+  bool found_hash = false, plain_hash = false;
+  for (int y = 3; y < screen.dimy(); ++y)
+    for (int x = 0; x < screen.dimx(); ++x)
+      if (screen.CellAt(x, y).character == "#")
+      {
+        found_hash = true;
+        plain_hash = screen.CellAt(x, y).foreground_color ==
+                     Color::RGB(0xd4, 0xd4, 0xd4);
+      }
+  Check(found_hash && plain_hash,
+        "markdown prose renders without JSON error highlighting");
+  Check(screen.cursor().y >= 4 && screen.cursor().y < 19,
+        "prompt editor receives focus");
+  view->OnEvent(Event::Character('x'));
+  Check(document->Text() == "x" + original, "typing routes to prompt editor");
+  view->OnEvent(Event::CtrlZ);
+  Check(document->Text() == original, "prompt editor undo works");
+  view->OnEvent(Event::Character('!'));
+  view->OnEvent(Event::CtrlS);
+  Check(ptoolkit::ReadConfigText(path) == "!" + original &&
+            !document->Modified(),
+        "Ctrl+S writes the global prompt");
+  view->OnEvent(Event::CtrlC);
+  Check(exits == 0, "Ctrl+C in focused prompt editor does not exit");
+
+  const auto created = root / "nested" / "CLAUDE.md";
+  app.ExecuteCommand("home");
+  auto created_view =
+      ptoolkit::CreateApplicationView(app, [] {}, {}, {}, created);
+  Draw(created_view);
+  created_view->OnEvent(Event::Character("claude_code_prompt_man"));
+  created_view->OnEvent(Event::Return);
+  document = app.GetClaudePromptDocument();
+  Check(document && document->Text().empty(),
+        "missing global prompt opens an editable empty buffer");
+  created_view->OnEvent(Event::Character("# New"));
+  created_view->OnEvent(Event::CtrlS);
+  Check(ptoolkit::ReadConfigText(created) == "# New",
+        "saving creates a missing CLAUDE.md and its directory");
+  app.ExecuteCommand("home");
+}
+
+void PromptPresetsAndSaving()
+{
+  const auto root =
+      std::filesystem::current_path() /
+      ("prompt-management-fixture-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(root);
+  struct Cleanup
+  {
+    std::filesystem::path root;
+    ~Cleanup() { std::filesystem::remove_all(root); }
+  } cleanup{root};
+  const auto path = root / "CLAUDE.md";
+  const auto presets = root / "presets";
+  const std::string original = "# Global rules\n\nBe concise.\n";
+  Check(ptoolkit::WriteConfigText(path, original).has_value(),
+        "write prompt preset fixture");
+  std::filesystem::create_directories(presets);
+  Check(ptoolkit::WriteConfigText(presets / "ignore.json", "not a prompt")
+            .has_value(),
+        "write non-prompt preset fixture");
+
+  auto& app = ptoolkit::App::GetInstance();
+  app.ExecuteCommand("home");
+  auto view = ptoolkit::CreateApplicationView(app, [] {}, {}, {}, path,
+                                              presets);
+  Draw(view);
+  view->OnEvent(Event::Character("claude_code_prompt_man"));
+  view->OnEvent(Event::Return);
+  Draw(view);
+  auto document = app.GetClaudePromptDocument();
+  Check(document != nullptr, "prompt preset session opens CLAUDE.md");
+  view->OnEvent(Event::Character(' '));
+  view->OnEvent(Event::CtrlS);
+  Check(ptoolkit::ReadConfigText(path) == " " + original &&
+            !document->Modified(),
+        "prompt save keeps the original global file target");
+
+  view->OnEvent(Event::CtrlP);
+  view->OnEvent(Event::Return);
+  view->OnEvent(Event::Character("style"));
+  view->OnEvent(Event::Return);
+  Check(ptoolkit::ReadConfigText(presets / "style.md") == " " + original &&
+            !std::filesystem::exists(presets / "style.json"),
+        "prompt preset is stored as <name>.md");
+  ptoolkit::PresetStore prompt_store(presets, ".md");
+  auto names = prompt_store.List();
+  Check(names && names->size() == 1 && names->front() == "style",
+        "prompt preset listing ignores other extensions");
+
+  view->OnEvent(Event::Character('r'));
+  for (int i = 0; i < 5; ++i) view->OnEvent(Event::Backspace);
+  view->OnEvent(Event::Character("renamed"));
+  view->OnEvent(Event::Return);
+  Check(!std::filesystem::exists(presets / "style.md") &&
+            ptoolkit::ReadConfigText(presets / "renamed.md") == " " + original,
+        "prompt preset rename changes only the preset file");
+
+  view->OnEvent(Event::CtrlP);
+  view->OnEvent(Event::Character('x'));
+  view->OnEvent(Event::CtrlP);
+  view->OnEvent(Event::Return);
+  Check(document->Text() == " " + original && document->Modified(),
+        "prompt preset load replaces editor contents without saving");
+  Check(ptoolkit::ReadConfigText(path) == " " + original,
+        "loading a prompt preset does not write CLAUDE.md");
+
+  view->OnEvent(Event::Character('d'));
+  view->OnEvent(Event::Return);
+  Check(!std::filesystem::exists(presets / "renamed.md"),
+        "prompt preset delete removes the .md file");
+  app.ExecuteCommand("home");
+}
 }  // namespace
 
 int main()
@@ -545,5 +705,7 @@ int main()
   IndependentPageScrolling();
   ClaudeConfiguration();
   PresetsAndSaving();
+  ClaudePrompt();
+  PromptPresetsAndSaving();
   std::cout << "All UI tests passed\n";
 }

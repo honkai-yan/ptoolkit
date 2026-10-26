@@ -150,6 +150,14 @@ std::expected<std::filesystem::path, std::string> ClaudePresetsPath()
          "claude_code_presets";
 }
 
+std::expected<std::filesystem::path, std::string> ClaudePromptPresetsPath()
+{
+  const auto prompt = ClaudePromptPath();
+  if (!prompt) return std::unexpected(prompt.error());
+  return prompt->parent_path().parent_path() / ".ptoolkit" /
+         "claude_code_prompt_presets";
+}
+
 std::expected<std::filesystem::path, std::string> PresetStore::Path(
     std::string_view name) const
 {
@@ -175,7 +183,9 @@ std::expected<std::filesystem::path, std::string> PresetStore::Path(
     return std::unexpected("This name is reserved by the operating system");
   std::u8string filename(reinterpret_cast<const char8_t*>(name.data()),
                          name.size());
-  filename += u8".json";
+  filename += std::u8string(
+      reinterpret_cast<const char8_t*>(m_extension.data()),
+      m_extension.size());
   return m_directory / std::filesystem::path(filename);
 }
 
@@ -199,7 +209,7 @@ std::expected<std::vector<std::string>, std::string> PresetStore::List() const
       if (ec) return std::unexpected("Cannot inspect preset: " + ec.message());
       continue;
     }
-    if (it->path().extension() != ".json") continue;
+    if (it->path().extension() != m_extension) continue;
     const auto name = it->path().stem().u8string();
     names.emplace_back(reinterpret_cast<const char*>(name.data()), name.size());
   }

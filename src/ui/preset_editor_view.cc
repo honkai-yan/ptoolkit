@@ -1,6 +1,5 @@
-#include "ui/claude_config_view.h"
+#include "ui/preset_editor_view.h"
 
-#include "app.h"
 #include "ui/dialog.h"
 
 #include <algorithm>
@@ -12,7 +11,7 @@
 
 namespace ptoolkit
 {
-class ClaudeConfigView::Sidebar : public ftxui::ComponentBase
+class PresetEditorView::Sidebar : public ftxui::ComponentBase
 {
 public:
   enum class Action
@@ -127,20 +126,20 @@ private:
   std::vector<ftxui::Box> m_rows;
 };
 
-ClaudeConfigView::ClaudeConfigView(App& app, std::filesystem::path presets_path)
-    : m_app(app)
+PresetEditorView::PresetEditorView(PresetEditorOptions options)
+    : m_options(std::move(options))
 {
-  if (presets_path.empty())
-  {
-    auto resolved = ClaudePresetsPath();
-    if (resolved)
-      presets_path = std::move(*resolved);
-    else
-      m_store_error = resolved.error();
-  }
+  m_store_error = m_options.presets_error;
   if (m_store_error.empty())
-    m_store = std::make_unique<PresetStore>(std::move(presets_path));
-  m_editor = std::make_shared<editor::Editor>();
+  {
+    if (m_options.presets_path.empty())
+      m_store_error = "Preset directory is unavailable";
+    else
+      m_store = std::make_unique<PresetStore>(m_options.presets_path,
+                                              m_options.preset_extension);
+  }
+  m_editor = std::make_shared<editor::Editor>(
+      std::make_shared<editor::Document>(), nullptr, m_options.json_highlight);
   m_sidebar = std::make_shared<Sidebar>(
       [this](Sidebar::Action action, const std::string& name)
       {
@@ -166,19 +165,19 @@ ClaudeConfigView::ClaudeConfigView(App& app, std::filesystem::path presets_path)
   Add(m_dialog);
   m_active = m_editor;
 }
-void ClaudeConfigView::SyncDocument()
+void PresetEditorView::SyncDocument()
 {
-  if (auto document = m_app.GetClaudeDocument())
+  if (auto document = m_options.get_document())
     m_editor->SetDocument(document);
 }
-void ClaudeConfigView::FocusEditor()
+void PresetEditorView::FocusEditor()
 {
   SyncDocument();
   m_editor->TakeFocus();
 }
-bool ClaudeConfigView::HasDialog() const { return m_dialog->Visible(); }
-ftxui::Component ClaudeConfigView::ActiveChild() { return m_active; }
-void ClaudeConfigView::SetActiveChild(ftxui::ComponentBase* child)
+bool PresetEditorView::HasDialog() const { return m_dialog->Visible(); }
+ftxui::Component PresetEditorView::ActiveChild() { return m_active; }
+void PresetEditorView::SetActiveChild(ftxui::ComponentBase* child)
 {
   for (const auto& component :
        {ftxui::Component(m_editor), ftxui::Component(m_sidebar),
@@ -189,19 +188,19 @@ void ClaudeConfigView::SetActiveChild(ftxui::ComponentBase* child)
       return;
     }
 }
-void ClaudeConfigView::RestoreFocus()
+void PresetEditorView::RestoreFocus()
 {
   if (m_return_to_sidebar && m_sidebar_open)
     m_sidebar->TakeFocus();
   else
     m_editor->TakeFocus();
 }
-void ClaudeConfigView::ShowError(std::string title, std::string message)
+void PresetEditorView::ShowError(std::string title, std::string message)
 {
   m_return_to_sidebar = m_sidebar_open && m_sidebar->Focused();
   m_dialog->Message(std::move(title), std::move(message));
 }
-void ClaudeConfigView::RefreshPresets(const std::string& select)
+void PresetEditorView::RefreshPresets(const std::string& select)
 {
   if (!m_store)
   {
@@ -216,32 +215,33 @@ void ClaudeConfigView::RefreshPresets(const std::string& select)
   }
   m_sidebar->SetNames(std::move(*names), select);
 }
-void ClaudeConfigView::CreatePreset()
+void PresetEditorView::CreatePreset()
 {
   m_return_to_sidebar = true;
-  m_dialog->Prompt("New preset", "Preset name (saved as <name>.json)", {},
-                   [this](const std::string& name)
-                   {
-                     if (!m_store)
-                     {
-                       ShowError("Preset error", m_store_error);
-                       return;
-                     }
-                     auto document = m_app.GetClaudeDocument();
-                     if (!document)
-                     {
-                       ShowError("Preset error", "No configuration is open");
-                       return;
-                     }
-                     const auto result =
-                         m_store->Create(name, document->Text());
-                     if (!result)
-                       ShowError("Cannot save preset", result.error());
-                     else
-                       RefreshPresets(name);
-                   });
+  m_dialog->Prompt(
+      "New preset",
+      "Preset name (saved as <name>" + m_options.preset_extension + ")",
+      {}, [this](const std::string& name)
+      {
+        if (!m_store)
+        {
+          ShowError("Preset error", m_store_error);
+          return;
+        }
+        auto document = m_options.get_document();
+        if (!document)
+        {
+          ShowError("Preset error", "No file is open");
+          return;
+        }
+        const auto result = m_store->Create(name, document->Text());
+        if (!result)
+          ShowError("Cannot save preset", result.error());
+        else
+          RefreshPresets(name);
+      });
 }
-void ClaudeConfigView::LoadPreset(const std::string& name)
+void PresetEditorView::LoadPreset(const std::string& name)
 {
   if (!m_store)
   {
@@ -254,10 +254,10 @@ void ClaudeConfigView::LoadPreset(const std::string& name)
     ShowError("Cannot load preset", contents.error());
     return;
   }
-  if (auto document = m_app.GetClaudeDocument())
+  if (auto document = m_options.get_document())
     document->ReplaceText(*contents);
 }
-void ClaudeConfigView::RenamePreset(const std::string& name)
+void PresetEditorView::RenamePreset(const std::string& name)
 {
   m_return_to_sidebar = true;
   m_dialog->Prompt("Rename preset", "New preset name", name,
@@ -270,7 +270,7 @@ void ClaudeConfigView::RenamePreset(const std::string& name)
                        RefreshPresets(replacement);
                    });
 }
-void ClaudeConfigView::DeletePreset(const std::string& name)
+void PresetEditorView::DeletePreset(const std::string& name)
 {
   m_return_to_sidebar = true;
   m_dialog->ConfirmAction("Delete preset", "Delete preset \"" + name + "\"?",
@@ -283,14 +283,14 @@ void ClaudeConfigView::DeletePreset(const std::string& name)
                               RefreshPresets();
                           });
 }
-bool ClaudeConfigView::OnEvent(ftxui::Event event)
+bool PresetEditorView::OnEvent(ftxui::Event event)
 {
   using namespace ftxui;
   SyncDocument();
   if (m_dialog->Visible()) return m_dialog->OnEvent(event);
   if (event == Event::CtrlS)
   {
-    const auto result = m_app.SaveClaudeSettings();
+    const auto result = m_options.save();
     if (!result) ShowError("Save failed", result.error());
     return true;
   }
@@ -315,18 +315,18 @@ bool ClaudeConfigView::OnEvent(ftxui::Event event)
   if (m_sidebar_open && m_sidebar->Focused()) return m_sidebar->OnEvent(event);
   return m_editor->OnEvent(event);
 }
-ftxui::Element ClaudeConfigView::OnRender()
+ftxui::Element PresetEditorView::OnRender()
 {
   using namespace ftxui;
   SyncDocument();
   Element page;
-  if (auto document = m_app.GetClaudeDocument())
+  if (auto document = m_options.get_document())
   {
     auto area = m_editor->Render() | flex;
     if (m_sidebar_open)
       area = dbox({area, hbox({m_sidebar->Render() | size(WIDTH, EQUAL, 32),
                                filler()})});
-    page = vbox({text(std::string("~/.claude/settings.json") +
+    page = vbox({text(m_options.file_label +
                       (document->Modified() ? " *" : "")),
                  area | flex,
                  text(m_editor->ClipboardError().empty()
@@ -336,8 +336,8 @@ ftxui::Element ClaudeConfigView::OnRender()
                      dim});
   }
   else
-    page = vbox({text("~/.claude/settings.json"),
-                 paragraph(m_app.GetClaudeError()) | color(Color::RedLight),
+    page = vbox({text(m_options.file_label),
+                 paragraph(m_options.get_error()) | color(Color::RedLight),
                  filler()});
   if (m_dialog->Visible())
     return dbox({page | flex, m_dialog->Render()}) | flex;

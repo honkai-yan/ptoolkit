@@ -5,6 +5,11 @@
 
 namespace system_info
 {
+// UTF-8 values; each call queries the OS independently.
+std::expected<std::string, std::string> GetNameZh();
+std::expected<std::string, std::string> GetNameEn();
+std::expected<std::string, std::string> GetDisplayVersion();
+std::expected<std::string, std::string> GetBuildVersion();
 #ifdef _WIN32
 namespace windows_version
 {

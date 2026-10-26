@@ -16,8 +16,71 @@
 #include <string>
 #include <utility>
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#include <cerrno>
+#include <cstring>
+#endif
+
 namespace system_info
 {
+#ifdef __APPLE__
+namespace
+{
+std::expected<std::string, std::string> ReadVersion(const char* key)
+{
+  size_t size = 0;
+  if (sysctlbyname(key, nullptr, &size, nullptr, 0) || size == 0)
+    return std::unexpected(std::string(key) + ": " + std::strerror(errno));
+  std::string value(size, '\0');
+  if (sysctlbyname(key, value.data(), &size, nullptr, 0))
+    return std::unexpected(std::string(key) + ": " + std::strerror(errno));
+  value.resize(size);
+  if (!value.empty() && value.back() == '\0') value.pop_back();
+  if (value.empty()) return std::unexpected(std::string(key) + " is empty");
+  return value;
+}
+}  // namespace
+#endif
+
+std::expected<std::string, std::string> GetNameZh()
+{
+#ifdef _WIN32
+  return windows_version::GetWindowsNameZh();
+#elif defined(__APPLE__)
+  return std::string("macOS");
+#else
+  return std::unexpected("Unsupported operating system");
+#endif
+}
+std::expected<std::string, std::string> GetNameEn()
+{
+#ifdef _WIN32
+  return windows_version::GetWindowsNameEn();
+#else
+  return GetNameZh();
+#endif
+}
+std::expected<std::string, std::string> GetDisplayVersion()
+{
+#ifdef _WIN32
+  return windows_version::GetWindowsDisplayVersion();
+#elif defined(__APPLE__)
+  return ReadVersion("kern.osproductversion");
+#else
+  return std::unexpected("Unsupported operating system");
+#endif
+}
+std::expected<std::string, std::string> GetBuildVersion()
+{
+#ifdef _WIN32
+  return windows_version::GetWindowsBuildVersion();
+#elif defined(__APPLE__)
+  return ReadVersion("kern.osversion");
+#else
+  return std::unexpected("Unsupported operating system");
+#endif
+}
 #ifdef _WIN32
 namespace windows_version
 {

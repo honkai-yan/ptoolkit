@@ -2,6 +2,9 @@
 
 #include "config_storage.h"
 
+#include <expected>
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -9,17 +12,32 @@
 
 namespace ptoolkit
 {
-class App;
 class Dialog;
 namespace editor
 {
+class Document;
 class Editor;
 }
 
-class ClaudeConfigView : public ftxui::ComponentBase
+// A file editor page with JSON/plain-text highlighting and a preset sidebar.
+// All state access goes through the callbacks so the same view serves Claude
+// Code settings and the global prompt.
+struct PresetEditorOptions
+{
+  std::filesystem::path presets_path;
+  std::string presets_error;
+  std::string file_label;
+  std::string preset_extension = ".json";
+  std::function<std::shared_ptr<editor::Document>()> get_document;
+  std::function<const std::string&()> get_error;
+  std::function<std::expected<void, std::string>()> save;
+  bool json_highlight = true;
+};
+
+class PresetEditorView : public ftxui::ComponentBase
 {
 public:
-  explicit ClaudeConfigView(App& app, std::filesystem::path presets_path = {});
+  explicit PresetEditorView(PresetEditorOptions options);
   void FocusEditor();
   bool HasDialog() const;
   bool Focusable() const override { return true; }
@@ -39,7 +57,7 @@ private:
   void DeletePreset(const std::string& name);
   void RestoreFocus();
 
-  App& m_app;
+  PresetEditorOptions m_options;
   std::unique_ptr<PresetStore> m_store;
   std::string m_store_error;
   std::shared_ptr<editor::Editor> m_editor;

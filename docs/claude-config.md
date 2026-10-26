@@ -59,6 +59,8 @@ the editor's cursor. New preset creation, rename and delete do not save settings
 
 See [the standalone editor documentation](../src/editor/README.md) for module
 boundaries, performance, limitations, build instructions and dependency research.
+The `claude_code_prompt_man` page edits `~/.claude/CLAUDE.md` with the same
+sidebar and key bindings; see [claude-prompt.md](claude-prompt.md).
 
 ## Verification
 

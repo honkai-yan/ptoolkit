@@ -27,7 +27,8 @@ public:
   {
     Home,
     Hello,
-    ClaudeCodeConfig
+    ClaudeCodeConfig,
+    ClaudeCodePrompt
   };
 
   static App& GetInstance();
@@ -41,22 +42,40 @@ public:
   const std::string& GetSystemEdition() const { return m_system_edition; }
   Page GetPage() const { return m_page; }
   bool ExecuteCommand(std::string_view command,
-                      const std::filesystem::path& claude_settings_path = {});
+                      const std::filesystem::path& claude_settings_path = {},
+                      const std::filesystem::path& claude_prompt_path = {});
   std::shared_ptr<editor::Document> GetClaudeDocument() const
   {
-    return m_claude_document;
+    return m_claude.document;
   }
-  const std::string& GetClaudeError() const { return m_claude_error; }
+  const std::string& GetClaudeError() const { return m_claude.error; }
   std::expected<void, std::string> SaveClaudeSettings();
+  std::shared_ptr<editor::Document> GetClaudePromptDocument() const
+  {
+    return m_prompt.document;
+  }
+  const std::string& GetClaudePromptError() const { return m_prompt.error; }
+  std::expected<void, std::string> SaveClaudePrompt();
+  // Document of the currently open file page, or null on other pages.
+  std::shared_ptr<editor::Document> GetActiveDocument() const;
 
 private:
   App() = default;
+  struct FileState
+  {
+    std::shared_ptr<editor::Document> document;
+    std::string error;
+    std::filesystem::path path;
+  };
+  static FileState OpenConfig(const std::filesystem::path& requested);
+  static FileState OpenPrompt(const std::filesystem::path& requested);
+  static std::expected<void, std::string> Save(FileState& state,
+                                               bool create_parent);
 
   HardwareInfo m_hardware_info;
   std::string m_system_edition;
   Page m_page = Page::Home;
-  std::shared_ptr<editor::Document> m_claude_document;
-  std::string m_claude_error;
-  std::filesystem::path m_claude_path;
+  FileState m_claude;
+  FileState m_prompt;
 };
 }  // namespace ptoolkit

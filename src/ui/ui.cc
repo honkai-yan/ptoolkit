@@ -1,11 +1,12 @@
 #include "ui/ui.h"
 
 #include "app.h"
-#include "ui/claude_config_view.h"
 #include "ui/command_input.h"
+#include "ui/preset_editor_view.h"
 #include "config.h"
 
 #include <algorithm>
+#include <expected>
 #include <format>
 #include <memory>
 #include <utility>
@@ -68,53 +69,111 @@ public:
 private:
   std::shared_ptr<PageScroll> m_scroll;
 };
+
+bool IsEditorPage(App::Page page)
+{
+  return page == App::Page::ClaudeCodeConfig ||
+         page == App::Page::ClaudeCodePrompt;
+}
+
+template <typename Fallback>
+std::expected<std::filesystem::path, std::string> PresetsPath(
+    const std::filesystem::path& given, Fallback fallback)
+{
+  if (!given.empty()) return given;
+  return fallback();
+}
 }  // namespace
 
 ftxui::Component CreateApplicationView(
     App& app, std::function<void()> on_exit,
     std::filesystem::path claude_settings_path,
-    std::filesystem::path claude_presets_path)
+    std::filesystem::path claude_presets_path,
+    std::filesystem::path claude_prompt_path,
+    std::filesystem::path claude_prompt_presets_path)
 {
   using namespace ftxui;
   auto scroll = std::make_shared<PageScroll>();
-  auto claude_view =
-      std::make_shared<ClaudeConfigView>(app, std::move(claude_presets_path));
+  const auto config_presets = PresetsPath(claude_presets_path,
+                                          ClaudePresetsPath);
+  const auto prompt_presets = PresetsPath(claude_prompt_presets_path,
+                                          ClaudePromptPresetsPath);
+  PresetEditorOptions config_options{
+      .presets_path = config_presets ? *config_presets
+                                     : std::filesystem::path{},
+      .presets_error = config_presets ? std::string{}
+                                      : config_presets.error(),
+      .file_label = "~/.claude/settings.json",
+      .preset_extension = ".json",
+      .get_document = [&app] { return app.GetClaudeDocument(); },
+      .get_error = [&app]() -> const std::string&
+      { return app.GetClaudeError(); },
+      .save = [&app] { return app.SaveClaudeSettings(); },
+      .json_highlight = true,
+  };
+  PresetEditorOptions prompt_options{
+      .presets_path = prompt_presets ? *prompt_presets
+                                     : std::filesystem::path{},
+      .presets_error = prompt_presets ? std::string{}
+                                      : prompt_presets.error(),
+      .file_label = "~/.claude/CLAUDE.md",
+      .preset_extension = ".md",
+      .get_document = [&app] { return app.GetClaudePromptDocument(); },
+      .get_error = [&app]() -> const std::string&
+      { return app.GetClaudePromptError(); },
+      .save = [&app] { return app.SaveClaudePrompt(); },
+      .json_highlight = false,
+  };
+  auto config_view =
+      std::make_shared<PresetEditorView>(std::move(config_options));
+  auto prompt_view =
+      std::make_shared<PresetEditorView>(std::move(prompt_options));
   auto input = std::make_shared<CommandInput>(
       std::vector<Command>{
           {"home", "System and hardware information"},
           {"hello", "Show hello world"},
-          {"claude_code_config_man", "Edit Claude Code user settings"}},
-      [&app, scroll, claude_view,
-       claude_settings_path](const std::string& command)
+          {"claude_code_config_man", "Edit Claude Code user settings"},
+          {"claude_code_prompt_man", "Edit global Claude Code prompt"}},
+      [&app, scroll, config_view, prompt_view, claude_settings_path,
+       claude_prompt_path](const std::string& command)
       {
-        if (!app.ExecuteCommand(command, claude_settings_path)) return false;
+        if (!app.ExecuteCommand(command, claude_settings_path,
+                                claude_prompt_path))
+          return false;
         scroll->offset = 0;
         if (app.GetPage() == App::Page::ClaudeCodeConfig &&
             app.GetClaudeDocument())
-        {
-          claude_view->FocusEditor();
-        }
+          config_view->FocusEditor();
+        else if (app.GetPage() == App::Page::ClaudeCodePrompt &&
+                 app.GetClaudePromptDocument())
+          prompt_view->FocusEditor();
         return true;
       });
   auto components = Container::Vertical(
-      {Maybe(claude_view,
+      {Maybe(config_view,
              [&app]
              {
                return app.GetPage() == App::Page::ClaudeCodeConfig &&
                       app.GetClaudeDocument();
              }),
+       Maybe(prompt_view,
+             [&app]
+             {
+               return app.GetPage() == App::Page::ClaudeCodePrompt &&
+                      app.GetClaudePromptDocument();
+             }),
        input});
   auto view = Renderer(
       components,
-      [&app, input, scroll, claude_view]
+      [&app, input, scroll, config_view, prompt_view]
       {
         Element page;
         if (app.GetPage() == App::Page::Hello)
           page = text("hello world");
         else if (app.GetPage() == App::Page::ClaudeCodeConfig)
-        {
-          page = claude_view->Render();
-        }
+          page = config_view->Render();
+        else if (app.GetPage() == App::Page::ClaudeCodePrompt)
+          page = prompt_view->Render();
         else
         {
           const auto& hardware = app.GetHardwareInfo();
@@ -131,7 +190,7 @@ ftxui::Component CreateApplicationView(
           page = table.Render();
         }
         Element main_content =
-            app.GetPage() == App::Page::ClaudeCodeConfig
+            IsEditorPage(app.GetPage())
                 ? page | flex
                 : std::make_shared<PageViewport>(page, scroll);
         auto content =
@@ -147,37 +206,42 @@ ftxui::Component CreateApplicationView(
   input->TakeFocus();
   return CatchEvent(
       view,
-      [on_exit = std::move(on_exit), scroll, &app, input,
-       claude_view](Event event)
+      [on_exit = std::move(on_exit), scroll, &app, input, config_view,
+       prompt_view](Event event)
       {
+        PresetEditorView* editor_view = nullptr;
         if (app.GetPage() == App::Page::ClaudeCodeConfig)
+          editor_view = config_view.get();
+        else if (app.GetPage() == App::Page::ClaudeCodePrompt)
+          editor_view = prompt_view.get();
+        if (editor_view)
         {
-          if (claude_view->HasDialog()) return claude_view->OnEvent(event);
+          if (editor_view->HasDialog()) return editor_view->OnEvent(event);
           if (event == Event::CtrlS || event == Event::CtrlP)
-            return claude_view->OnEvent(event);
+            return editor_view->OnEvent(event);
         }
         if (event == Event::CtrlC)
         {
-          if (app.GetPage() == App::Page::ClaudeCodeConfig &&
-              app.GetClaudeDocument() && claude_view->Focused())
-            return claude_view->OnEvent(event);
+          if (editor_view && app.GetActiveDocument() &&
+              editor_view->Focused())
+            return editor_view->OnEvent(event);
           on_exit();
           return true;
         }
-        if (event == Event::F6 &&
-            app.GetPage() == App::Page::ClaudeCodeConfig &&
-            app.GetClaudeDocument())
+        if (event == Event::F6 && editor_view && app.GetActiveDocument())
         {
-          app.GetClaudeDocument()->BreakUndoGroup();
-          if (claude_view->Focused())
+          app.GetActiveDocument()->BreakUndoGroup();
+          if (editor_view->Focused())
             input->TakeFocus();
           else
-            claude_view->FocusEditor();
+            editor_view->FocusEditor();
           return true;
         }
         // Keep Ctrl+Z from suspending the process outside the editor.
-        if (event == Event::CtrlZ && !claude_view->Focused()) return true;
-        if (event.is_mouse() && app.GetPage() != App::Page::ClaudeCodeConfig &&
+        if (event == Event::CtrlZ &&
+            !(editor_view && editor_view->Focused()))
+          return true;
+        if (event.is_mouse() && !IsEditorPage(app.GetPage()) &&
             scroll->box.Contain(event.mouse().x, event.mouse().y))
         {
           if (event.mouse().button == Mouse::WheelUp)

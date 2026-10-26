@@ -4,6 +4,10 @@
 #include <cstring>
 #include <limits>
 
+#ifdef __APPLE__
+#include "clipboard_macos.h"
+#endif
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -149,6 +153,10 @@ public:
 }  // namespace
 std::shared_ptr<Clipboard> MakeSystemClipboard()
 {
+#ifdef __APPLE__
+  return detail::MakeMacClipboard();
+#else
   return std::make_shared<SystemClipboard>();
+#endif
 }
 }  // namespace ptoolkit::editor

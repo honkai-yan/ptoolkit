@@ -11,8 +11,9 @@ This directory can be copied into a separate project unchanged.
 - `json_highlight`: a tolerant, line-local JSON lexer and VS Code Dark+ colors.
 - `Editor`: a regular FTXUI `ComponentBase`, including a gutter, caret, scrolling
   and a bounded cache of visible lines. It owns no terminal or event loop.
-- `Clipboard`: a small injectable UTF-8 interface. The default Windows backend
-  uses the system Unicode clipboard; other platforms can supply a backend.
+- `Clipboard`: a small injectable UTF-8 interface. Windows uses the system
+  Unicode clipboard; macOS uses AppKit's `NSPasteboard`. Other platforms can
+  supply a backend.
 - File paths, reading/parsing configuration, command routing and application
   state belong to the host application, not this library. In ptoolkit these
   are implemented in `src/claude_config.*`, `src/app.*` and `src/ui.*`.
@@ -127,6 +128,22 @@ the document normalizes pasted line endings back to LF. It creates a message-onl
 owner window lazily on the UI thread, as required by
 [OpenClipboard / SetClipboardData](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-openclipboard).
 No shell commands or clipboard helper processes are used.
+
+The macOS backend uses the general system pasteboard and preserves UTF-8 text
+and line endings. NULs and invalid UTF-8 are rejected before replacing its
+contents. Its tests use a randomly named private pasteboard, leaving the user's
+clipboard untouched. CMake enables Objective-C++23 and links AppKit on macOS.
+Run the application/editor on the UI thread in a normal logged-in session.
+
+On macOS, shortcuts remain Ctrl-based. Cmd+C/V is normally handled by the
+terminal application; use Ctrl+C/V inside this widget. Modified navigation keys
+depend on the escape sequences emitted by the terminal. Ctrl+Y is the redo
+fallback when Ctrl+Shift+Z is indistinguishable from Ctrl+Z.
+
+With `PTOOLKIT_EDITOR_BUILD_EXAMPLE=ON`, `--terminal-probe` runs the demo with
+an in-memory clipboard and accepts externally supplied VT input. The root
+project's `tests/terminal_smoke.py` drives this mode through a POSIX PTY and
+checks the same final document/selection assertions as the Windows probe.
 
 ### Windows input adapter
 

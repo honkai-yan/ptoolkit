@@ -33,8 +33,10 @@ public:
 int main(int argc, char** argv)
 {
   using namespace ftxui;
-  const bool probe =
-      argc > 1 && std::string_view(argv[1]) == "--keyboard-probe";
+  const bool terminal_probe =
+      argc > 1 && std::string_view(argv[1]) == "--terminal-probe";
+  const bool probe = terminal_probe ||
+      (argc > 1 && std::string_view(argv[1]) == "--keyboard-probe");
   const std::string original =
       "{\n  \"name\": \"Standalone FTXUI editor\",\n  \"enabled\": true,\n  "
       "\"number\": 42,\n  \"empty\": null\n}\n";
@@ -90,7 +92,7 @@ int main(int argc, char** argv)
                     });
 
   std::thread native_input;
-  if (probe)
+  if (probe && !terminal_probe)
   {
 #ifdef _WIN32
     native_input = std::thread(

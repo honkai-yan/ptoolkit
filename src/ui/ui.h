@@ -11,5 +11,7 @@ class App;
 ftxui::Component CreateApplicationView(
     App& app, std::function<void()> on_exit,
     std::filesystem::path claude_settings_path = {},
-    std::filesystem::path claude_presets_path = {});
+    std::filesystem::path claude_presets_path = {},
+    std::filesystem::path claude_prompt_path = {},
+    std::filesystem::path claude_prompt_presets_path = {});
 }  // namespace ptoolkit

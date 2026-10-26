@@ -16,8 +16,77 @@ App& App::GetInstance()
   return app;
 }
 
+App::FileState App::OpenConfig(const std::filesystem::path& requested)
+{
+  FileState state;
+  auto path = requested.empty() ? ClaudeSettingsPath()
+                                : std::expected<std::filesystem::path,
+                                                std::string>(requested);
+  if (!path)
+  {
+    state.error = path.error();
+    return state;
+  }
+  auto config = LoadClaudeConfig(*path);
+  if (!config)
+  {
+    state.error = config.error();
+    state.path = *path;
+    return state;
+  }
+  state.path = config->path;
+  state.document = std::move(config->document);
+  return state;
+}
+
+App::FileState App::OpenPrompt(const std::filesystem::path& requested)
+{
+  FileState state;
+  auto path = requested.empty() ? ClaudePromptPath()
+                                : std::expected<std::filesystem::path,
+                                                std::string>(requested);
+  if (!path)
+  {
+    state.error = path.error();
+    return state;
+  }
+  auto prompt = LoadClaudePrompt(*path);
+  if (!prompt)
+  {
+    state.error = prompt.error();
+    state.path = *path;
+    return state;
+  }
+  state.path = prompt->path;
+  state.document = std::move(prompt->document);
+  return state;
+}
+
+std::expected<void, std::string> App::Save(FileState& state,
+                                           bool create_parent)
+{
+  if (!state.document || state.path.empty())
+    return std::unexpected("No Claude Code file is open");
+  if (create_parent)
+  {
+    const auto parent = state.path.parent_path();
+    if (!parent.empty())
+    {
+      std::error_code ec;
+      std::filesystem::create_directories(parent, ec);
+      if (ec)
+        return std::unexpected("Cannot create " + parent.string() + ": " +
+                               ec.message());
+    }
+  }
+  auto result = WriteConfigText(state.path, state.document->Text());
+  if (result) state.document->MarkSaved();
+  return result;
+}
+
 bool App::ExecuteCommand(std::string_view command,
-                         const std::filesystem::path& claude_settings_path)
+                         const std::filesystem::path& claude_settings_path,
+                         const std::filesystem::path& claude_prompt_path)
 {
   if (command == "home")
     m_page = Page::Home;
@@ -26,26 +95,12 @@ bool App::ExecuteCommand(std::string_view command,
   else if (command == "claude_code_config_man")
   {
     m_page = Page::ClaudeCodeConfig;
-    m_claude_document.reset();
-    m_claude_error.clear();
-    m_claude_path.clear();
-    auto path = claude_settings_path.empty()
-                    ? ClaudeSettingsPath()
-                    : std::expected<std::filesystem::path, std::string>(
-                          claude_settings_path);
-    if (!path)
-      m_claude_error = path.error();
-    else
-    {
-      auto config = LoadClaudeConfig(*path);
-      if (!config)
-        m_claude_error = config.error();
-      else
-      {
-        m_claude_path = config->path;
-        m_claude_document = std::move(config->document);
-      }
-    }
+    m_claude = OpenConfig(claude_settings_path);
+  }
+  else if (command == "claude_code_prompt_man")
+  {
+    m_page = Page::ClaudeCodePrompt;
+    m_prompt = OpenPrompt(claude_prompt_path);
   }
   else
     return false;
@@ -54,20 +109,27 @@ bool App::ExecuteCommand(std::string_view command,
 
 std::expected<void, std::string> App::SaveClaudeSettings()
 {
-  if (!m_claude_document || m_claude_path.empty())
-    return std::unexpected("No Claude Code configuration is open");
-  auto result = WriteConfigText(m_claude_path, m_claude_document->Text());
-  if (result) m_claude_document->MarkSaved();
-  return result;
+  return Save(m_claude, false);
+}
+
+std::expected<void, std::string> App::SaveClaudePrompt()
+{
+  return Save(m_prompt, true);
+}
+
+std::shared_ptr<editor::Document> App::GetActiveDocument() const
+{
+  if (m_page == Page::ClaudeCodeConfig) return m_claude.document;
+  if (m_page == Page::ClaudeCodePrompt) return m_prompt.document;
+  return {};
 }
 
 std::expected<void, std::string> App::Init()
 {
-#ifdef _WIN32
-  using namespace system_info::windows_version;
-  const auto en = GetWindowsNameEn();
-  const auto display = GetWindowsDisplayVersion();
-  const auto build = GetWindowsBuildVersion();
+#if defined(_WIN32) || defined(__APPLE__)
+  const auto en = system_info::GetNameEn();
+  const auto display = system_info::GetDisplayVersion();
+  const auto build = system_info::GetBuildVersion();
   for (const auto* result : {&en, &display, &build})
   {
     if (!result->has_value()) return std::unexpected(result->error());
@@ -88,6 +150,13 @@ std::expected<void, std::string> App::Init()
   for (const auto& gpu : *gpus)
   {
     if (!hardware.gpu.empty()) hardware.gpu += "; ";
+#ifdef __APPLE__
+    if (gpu.dedicated_memory_bytes == 0)
+    {
+      hardware.gpu += gpu.brand_name + " (shared/system memory)";
+      continue;
+    }
+#endif
     hardware.gpu += std::format("{} {:.2f} GiB", gpu.brand_name,
                                 gpu.dedicated_memory_bytes / bytes_per_gib);
   }

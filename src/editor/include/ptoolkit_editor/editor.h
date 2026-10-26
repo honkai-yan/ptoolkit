@@ -21,7 +21,7 @@ class Editor : public ftxui::ComponentBase
 public:
   explicit Editor(
       std::shared_ptr<Document> document = std::make_shared<Document>(),
-      std::shared_ptr<Clipboard> clipboard = {});
+      std::shared_ptr<Clipboard> clipboard = {}, bool json_highlight = true);
   void SetDocument(std::shared_ptr<Document> document);
   std::shared_ptr<Document> GetDocument() const { return m_document; }
   const std::string& ClipboardError() const { return m_clipboard_error; }
@@ -52,6 +52,7 @@ private:
   std::shared_ptr<Document> m_document;
   std::shared_ptr<Clipboard> m_clipboard;
   std::string m_clipboard_error;
+  bool m_json_highlight = true;
   ftxui::CapturedMouse m_mouse_capture;
   bool m_dragging = false;
   int m_click_count = 0;
