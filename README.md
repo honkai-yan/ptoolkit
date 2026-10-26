@@ -78,9 +78,11 @@ not been rebuilt on Windows in this macOS session.
 ## Editor and FTXUI
 
 See `src/editor/README.md` for embedding and key bindings. macOS uses a native
-AppKit clipboard backend. Shortcuts remain Ctrl-based; Cmd+C/V and some modified
-navigation keys can be intercepted by the terminal emulator. Ctrl+Y provides a
-redo alternative to Ctrl+Shift+Z.
+AppKit clipboard backend. On macOS, Option+Left/Right jump by word and
+Option+Shift+Left/Right select by word, covering both xterm Alt sequences and
+the `ESC b/f` forms used by iTerm2 and Terminal.app. Ctrl-based shortcuts remain
+available; Cmd+C/V and some modified navigation keys can be intercepted by the
+terminal emulator. Ctrl+Y provides a redo alternative to Ctrl+Shift+Z.
 
 FTXUI stays a regular directory. Its existing Windows input patch is unchanged;
 macOS uses the upstream POSIX terminal implementation. To run FTXUI's own tests

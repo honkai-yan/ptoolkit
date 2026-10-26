@@ -215,6 +215,57 @@ void ComponentAndHighlight()
         "resize keeps cursor visible");
 }
 
+#if defined(__APPLE__)
+void MacWordNavigation()
+{
+  auto document = std::make_shared<Document>("alpha beta gamma");
+  auto editor = std::make_shared<ptoolkit::editor::Editor>(document);
+
+  // Option+arrow uses the xterm Alt modifier sequences.
+  editor->OnEvent(Event::Special("\x1b[1;3C"));
+  Check(document->Cursor() == Position{0, 5}, "Option+Right: word end");
+  editor->OnEvent(Event::Special("\x1b[1;3C"));
+  Check(document->Cursor() == Position{0, 10},
+        "Option+Right skips separator and stops at next word end");
+  editor->OnEvent(Event::Special("\x1b[1;3D"));
+  Check(document->Cursor() == Position{0, 6}, "Option+Left: word start");
+
+  // iTerm2 natural text editing and Terminal.app Option-as-Meta send ESC b/f.
+  editor->OnEvent(Event::Special("\x1b""f"));
+  Check(document->Cursor() == Position{0, 10}, "Meta+f moves word right");
+  editor->OnEvent(Event::Special("\x1b""b"));
+  Check(document->Cursor() == Position{0, 6}, "Meta+b moves word left");
+
+  // Option+Shift+arrow extends the selection one word at a time.
+  document->ClearSelection();
+  document->SetCursor({0, 0});
+  editor->OnEvent(Event::Special("\x1b[1;4C"));
+  Check(document->SelectedText() == "alpha",
+        "Option+Shift+Right selects a word");
+  editor->OnEvent(Event::Special("\x1b[1;4C"));
+  Check(document->SelectedText() == "alpha beta",
+        "repeated Option+Shift+Right extends the selection");
+  editor->OnEvent(Event::Special("\x1b[1;4D"));
+  Check(document->SelectedText() == "alpha ",
+        "Option+Shift+Left shrinks the selection by a word");
+
+  document->ClearSelection();
+  document->SetCursor({0, 10});
+  editor->OnEvent(Event::Special("\x1b""B"));
+  Check(document->SelectedText() == "beta", "Meta+B selects the previous word");
+  document->ClearSelection();
+  document->SetCursor({0, 0});
+  editor->OnEvent(Event::Special("\x1b""F"));
+  Check(document->SelectedText() == "alpha", "Meta+F selects the next word");
+
+  // Existing Windows-style bindings remain usable on macOS.
+  document->ClearSelection();
+  document->SetCursor({0, 0});
+  editor->OnEvent(Event::Special("\x1b[1;5C"));
+  Check(document->Cursor() == Position{0, 5}, "Ctrl+Right remains available");
+}
+#endif
+
 class MemoryClipboard : public Clipboard
 {
 public:
@@ -805,6 +856,9 @@ int main(int argc, char** argv)
   Editing();
   Navigation();
   ComponentAndHighlight();
+#if defined(__APPLE__)
+  MacWordNavigation();
+#endif
   SelectionsAndClipboard();
   CutClipboard();
   NextOccurrenceEditing();

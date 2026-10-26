@@ -43,6 +43,19 @@ constexpr KeyMovement movement_keys[] = {
     {"\x1b[8;6~", Movement::DocumentEnd, true},
     {"\x1b[1;6~", Movement::DocumentHome, true},
     {"\x1b[4;6~", Movement::DocumentEnd, true},
+#if defined(__APPLE__)
+    // macOS terminals send Option as Alt/Meta. xterm-style terminals use
+    // CSI 1;3 (Option) and CSI 1;4 (Option+Shift); iTerm2's natural text
+    // editing and Terminal.app's "Option as Meta" send ESC b/f and ESC B/F.
+    {"\x1b[1;3D", Movement::WordLeft, false},
+    {"\x1b[1;3C", Movement::WordRight, false},
+    {"\x1b[1;4D", Movement::WordLeft, true},
+    {"\x1b[1;4C", Movement::WordRight, true},
+    {"\x1b""b", Movement::WordLeft, false},
+    {"\x1b""f", Movement::WordRight, false},
+    {"\x1b""B", Movement::WordLeft, true},
+    {"\x1b""F", Movement::WordRight, true},
+#endif
 };
 void SanitizePaste(std::string& text)
 {

@@ -80,6 +80,8 @@ The root project can also enable `PTOOLKIT_EDITOR_BUILD_TESTS` and
 | Ctrl+X | Cut selection as one undo transaction; with no selection, do nothing |
 | Ctrl+V | Paste text, replacing selection, as one undo transaction |
 | Ctrl+Left / Ctrl+Right | VS Code Windows WordStartFast / WordEnd behavior |
+| Option+Left / Option+Right (macOS) | Word start / word end |
+| Option+Shift+Left / Right (macOS) | Select by word |
 | Home / End | Start / end of the current line |
 | Ctrl+Home / Ctrl+End | Start / end of the document |
 | Ctrl+Z | Undo |
@@ -135,10 +137,13 @@ contents. Its tests use a randomly named private pasteboard, leaving the user's
 clipboard untouched. CMake enables Objective-C++23 and links AppKit on macOS.
 Run the application/editor on the UI thread in a normal logged-in session.
 
-On macOS, shortcuts remain Ctrl-based. Cmd+C/V is normally handled by the
-terminal application; use Ctrl+C/V inside this widget. Modified navigation keys
-depend on the escape sequences emitted by the terminal. Ctrl+Y is the redo
-fallback when Ctrl+Shift+Z is indistinguishable from Ctrl+Z.
+On macOS, Option+Left/Right move by word and Option+Shift+Left/Right select by
+word. The editor accepts both xterm Alt sequences (`CSI 1;3D/C` and
+`CSI 1;4D/C`) and `ESC b`/`f`/`B`/`F` as sent by iTerm2's natural text editing
+or Terminal.app's "Option as Meta" mode. Ctrl-based shortcuts remain available.
+Cmd+C/V is normally handled by the terminal application; use Ctrl+C/V inside
+this widget. Ctrl+Y is the redo fallback when Ctrl+Shift+Z is indistinguishable
+from Ctrl+Z.
 
 With `PTOOLKIT_EDITOR_BUILD_EXAMPLE=ON`, `--terminal-probe` runs the demo with
 an in-memory clipboard and accepts externally supplied VT input. The root
